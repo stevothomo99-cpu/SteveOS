@@ -13,15 +13,57 @@ export type HubSpotLeadSummary = {
   error?: string
 }
 
-async function searchLeads(sourceValue: string): Promise<HubSpotLeadSummary> {
-  const token = process.env.HUBSPOT_PRIVATE_APP_TOKEN
-  const propertyName = process.env.HUBSPOT_SOURCE_PROPERTY || 'focablyed_source'
+type HubSpotProperty = {
+  name: string
+  label: string
+  options?: Array<{ label: string; value: string }>
+}
 
-  if (!token) {
-    return { configured: false, source: sourceValue, total: 0, recent: [] }
+async function resolveSourceProperty(token: string) {
+  const response = await fetch('https://api.hubapi.com/crm/v3/properties/contacts', {
+    headers: { Authorization: `Bearer ${token}` },
+    next: { revalidate: 3600 },
+  })
+
+  if (!response.ok) {
+    throw new Error(`Unable to read HubSpot properties (${response.status})`)
   }
 
+  const data = await response.json()
+  const properties: HubSpotProperty[] = data.results || []
+  const requestedLabel = process.env.HUBSPOT_SOURCE_LABEL || 'FocablyED Source'
+  const configuredName = process.env.HUBSPOT_SOURCE_PROPERTY
+
+  const property = configuredName
+    ? properties.find((item) => item.name === configuredName)
+    : properties.find((item) => item.label.toLowerCase() === requestedLabel.toLowerCase())
+
+  if (!property) {
+    throw new Error(`HubSpot contact property "${requestedLabel}" was not found`)
+  }
+
+  return property
+}
+
+function resolveOptionValue(property: HubSpotProperty, requestedLabel: string) {
+  const option = property.options?.find(
+    (item) => item.label.toLowerCase() === requestedLabel.toLowerCase() || item.value === requestedLabel,
+  )
+
+  if (!option) {
+    throw new Error(`HubSpot option "${requestedLabel}" was not found in ${property.label}`)
+  }
+
+  return option.value
+}
+
+async function searchLeads(
+  token: string,
+  property: HubSpotProperty,
+  sourceLabel: string,
+): Promise<HubSpotLeadSummary> {
   try {
+    const sourceValue = resolveOptionValue(property, sourceLabel)
     const response = await fetch('https://api.hubapi.com/crm/v3/objects/contacts/search', {
       method: 'POST',
       headers: {
@@ -33,25 +75,25 @@ async function searchLeads(sourceValue: string): Promise<HubSpotLeadSummary> {
           {
             filters: [
               {
-                propertyName,
+                propertyName: property.name,
                 operator: 'EQ',
                 value: sourceValue,
               },
             ],
           },
         ],
-        properties: ['firstname', 'lastname', 'email', 'createdate', propertyName],
+        properties: ['firstname', 'lastname', 'email', 'createdate', property.name],
         sorts: ['-createdate'],
         limit: 5,
       }),
-      next: { revalidate: 300 },
+      cache: 'no-store',
     })
 
     if (!response.ok) {
       const detail = await response.text()
       return {
         configured: true,
-        source: sourceValue,
+        source: sourceLabel,
         total: 0,
         recent: [],
         error: `HubSpot returned ${response.status}: ${detail.slice(0, 160)}`,
@@ -72,14 +114,14 @@ async function searchLeads(sourceValue: string): Promise<HubSpotLeadSummary> {
 
     return {
       configured: true,
-      source: sourceValue,
+      source: sourceLabel,
       total: data.total || 0,
       recent,
     }
   } catch (error) {
     return {
       configured: true,
-      source: sourceValue,
+      source: sourceLabel,
       total: 0,
       recent: [],
       error: error instanceof Error ? error.message : 'Unable to load HubSpot leads',
@@ -88,15 +130,36 @@ async function searchLeads(sourceValue: string): Promise<HubSpotLeadSummary> {
 }
 
 export async function getLeadSources() {
-  const siteMarginValue = process.env.HUBSPOT_SITEMARGIN_SOURCE || 'SiteMargin Waitlist'
-  const focablyValue = process.env.HUBSPOT_FOCABLY_SOURCE || 'FocablyED Waitlist'
-  const yfdValue = process.env.HUBSPOT_YFD_SOURCE || 'YFD Lead'
+  const token = process.env.HUBSPOT_PRIVATE_APP_TOKEN
+  const siteMarginLabel = process.env.HUBSPOT_SITEMARGIN_SOURCE || 'SiteMargin Waitlist'
+  const focablyLabel = process.env.HUBSPOT_FOCABLY_SOURCE || 'FocablyED Waitlist'
+  const yfdLabel = process.env.HUBSPOT_YFD_SOURCE || 'YFD Lead'
 
-  const [siteMargin, focably, yfd] = await Promise.all([
-    searchLeads(siteMarginValue),
-    searchLeads(focablyValue),
-    searchLeads(yfdValue),
-  ])
+  if (!token) {
+    const empty = (source: string): HubSpotLeadSummary => ({ configured: false, source, total: 0, recent: [] })
+    return {
+      siteMargin: empty(siteMarginLabel),
+      focably: empty(focablyLabel),
+      yfd: empty(yfdLabel),
+    }
+  }
 
-  return { siteMargin, focably, yfd }
+  try {
+    const property = await resolveSourceProperty(token)
+    const [siteMargin, focably, yfd] = await Promise.all([
+      searchLeads(token, property, siteMarginLabel),
+      searchLeads(token, property, focablyLabel),
+      searchLeads(token, property, yfdLabel),
+    ])
+
+    return { siteMargin, focably, yfd }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unable to resolve HubSpot lead source property'
+    const failed = (source: string): HubSpotLeadSummary => ({ configured: true, source, total: 0, recent: [], error: message })
+    return {
+      siteMargin: failed(siteMarginLabel),
+      focably: failed(focablyLabel),
+      yfd: failed(yfdLabel),
+    }
+  }
 }
