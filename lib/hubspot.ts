@@ -16,17 +16,20 @@ export type HubSpotLeadSummary = {
 type HubSpotProperty = {
   name: string
   label: string
+  type?: string
+  fieldType?: string
   options?: Array<{ label: string; value: string }>
 }
 
 async function resolveSourceProperty(token: string) {
   const response = await fetch('https://api.hubapi.com/crm/v3/properties/contacts', {
     headers: { Authorization: `Bearer ${token}` },
-    next: { revalidate: 3600 },
+    cache: 'no-store',
   })
 
   if (!response.ok) {
-    throw new Error(`Unable to read HubSpot properties (${response.status})`)
+    const detail = await response.text()
+    throw new Error(`Unable to read HubSpot contact properties (${response.status}): ${detail.slice(0, 160)}`)
   }
 
   const data = await response.json()
@@ -34,9 +37,15 @@ async function resolveSourceProperty(token: string) {
   const requestedLabel = process.env.HUBSPOT_SOURCE_LABEL || 'FocablyED Source'
   const configuredName = process.env.HUBSPOT_SOURCE_PROPERTY
 
-  const property = configuredName
+  const byConfiguredName = configuredName
     ? properties.find((item) => item.name === configuredName)
-    : properties.find((item) => item.label.toLowerCase() === requestedLabel.toLowerCase())
+    : undefined
+
+  const byLabel = properties.find(
+    (item) => item.label.trim().toLowerCase() === requestedLabel.trim().toLowerCase(),
+  )
+
+  const property = byConfiguredName || byLabel
 
   if (!property) {
     throw new Error(`HubSpot contact property "${requestedLabel}" was not found`)
@@ -46,15 +55,24 @@ async function resolveSourceProperty(token: string) {
 }
 
 function resolveOptionValue(property: HubSpotProperty, requestedLabel: string) {
-  const option = property.options?.find(
-    (item) => item.label.toLowerCase() === requestedLabel.toLowerCase() || item.value === requestedLabel,
+  if (!property.options?.length) return requestedLabel
+
+  const option = property.options.find(
+    (item) =>
+      item.label.trim().toLowerCase() === requestedLabel.trim().toLowerCase() ||
+      item.value === requestedLabel,
   )
 
   if (!option) {
-    throw new Error(`HubSpot option "${requestedLabel}" was not found in ${property.label}`)
+    const available = property.options.map((item) => item.label).join(', ')
+    throw new Error(`HubSpot option "${requestedLabel}" was not found in ${property.label}. Available: ${available}`)
   }
 
   return option.value
+}
+
+function getSearchOperator(property: HubSpotProperty) {
+  return property.fieldType === 'checkbox' ? 'CONTAINS_TOKEN' : 'EQ'
 }
 
 async function searchLeads(
@@ -76,7 +94,7 @@ async function searchLeads(
             filters: [
               {
                 propertyName: property.name,
-                operator: 'EQ',
+                operator: getSearchOperator(property),
                 value: sourceValue,
               },
             ],
@@ -96,7 +114,7 @@ async function searchLeads(
         source: sourceLabel,
         total: 0,
         recent: [],
-        error: `HubSpot returned ${response.status}: ${detail.slice(0, 160)}`,
+        error: `HubSpot returned ${response.status}: ${detail.slice(0, 200)}`,
       }
     }
 
@@ -114,7 +132,7 @@ async function searchLeads(
 
     return {
       configured: true,
-      source: sourceLabel,
+      source: `${sourceLabel} (${property.name}, ${property.fieldType || property.type || 'unknown'})`,
       total: data.total || 0,
       recent,
     }
