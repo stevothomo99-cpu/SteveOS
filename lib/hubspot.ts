@@ -7,18 +7,18 @@ export type HubSpotLead = {
 
 export type HubSpotLeadSummary = {
   configured: boolean
+  source: string
   total: number
   recent: HubSpotLead[]
   error?: string
 }
 
-export async function getEarlyAccessLeads(): Promise<HubSpotLeadSummary> {
+async function searchLeads(sourceValue: string): Promise<HubSpotLeadSummary> {
   const token = process.env.HUBSPOT_PRIVATE_APP_TOKEN
-  const propertyName = process.env.HUBSPOT_EARLY_ACCESS_PROPERTY || 'lifecyclestage'
-  const propertyValue = process.env.HUBSPOT_EARLY_ACCESS_VALUE || 'lead'
+  const propertyName = process.env.HUBSPOT_SOURCE_PROPERTY || 'focablyed_source'
 
   if (!token) {
-    return { configured: false, total: 0, recent: [] }
+    return { configured: false, source: sourceValue, total: 0, recent: [] }
   }
 
   try {
@@ -35,12 +35,12 @@ export async function getEarlyAccessLeads(): Promise<HubSpotLeadSummary> {
               {
                 propertyName,
                 operator: 'EQ',
-                value: propertyValue,
+                value: sourceValue,
               },
             ],
           },
         ],
-        properties: ['firstname', 'lastname', 'email', 'createdate'],
+        properties: ['firstname', 'lastname', 'email', 'createdate', propertyName],
         sorts: ['-createdate'],
         limit: 5,
       }),
@@ -51,6 +51,7 @@ export async function getEarlyAccessLeads(): Promise<HubSpotLeadSummary> {
       const detail = await response.text()
       return {
         configured: true,
+        source: sourceValue,
         total: 0,
         recent: [],
         error: `HubSpot returned ${response.status}: ${detail.slice(0, 160)}`,
@@ -71,15 +72,31 @@ export async function getEarlyAccessLeads(): Promise<HubSpotLeadSummary> {
 
     return {
       configured: true,
+      source: sourceValue,
       total: data.total || 0,
       recent,
     }
   } catch (error) {
     return {
       configured: true,
+      source: sourceValue,
       total: 0,
       recent: [],
       error: error instanceof Error ? error.message : 'Unable to load HubSpot leads',
     }
   }
+}
+
+export async function getLeadSources() {
+  const siteMarginValue = process.env.HUBSPOT_SITEMARGIN_SOURCE || 'SiteMargin Waitlist'
+  const focablyValue = process.env.HUBSPOT_FOCABLY_SOURCE || 'FocablyED Waitlist'
+  const yfdValue = process.env.HUBSPOT_YFD_SOURCE || 'YFD Lead'
+
+  const [siteMargin, focably, yfd] = await Promise.all([
+    searchLeads(siteMarginValue),
+    searchLeads(focablyValue),
+    searchLeads(yfdValue),
+  ])
+
+  return { siteMargin, focably, yfd }
 }
