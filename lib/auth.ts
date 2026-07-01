@@ -26,6 +26,10 @@ function getSecret() {
   return process.env.STEVEOS_AUTH_SECRET || ''
 }
 
+export function isAuthConfigured() {
+  return getUsers().length > 0 && Boolean(getSecret())
+}
+
 function sign(value: string) {
   return createHmac('sha256', getSecret()).update(value).digest('hex')
 }
@@ -78,6 +82,8 @@ export async function clearSession() {
 }
 
 export async function getCurrentUser() {
+  if (!isAuthConfigured()) return null
+
   const store = await cookies()
   const session = parseToken(store.get(COOKIE_NAME)?.value)
   if (!session) return null
@@ -87,6 +93,10 @@ export async function getCurrentUser() {
 }
 
 export async function requireUser() {
+  if (!isAuthConfigured()) {
+    return { email: 'vercel-protected', name: 'Steve' }
+  }
+
   const user = await getCurrentUser()
   if (!user) redirect('/login')
   return user
