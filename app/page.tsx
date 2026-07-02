@@ -4,6 +4,9 @@ import { StatusPill } from '../components/StatusPill'
 import { requireUser } from '../lib/auth'
 import { getLeadSources } from '../lib/hubspot'
 
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 const criticalFive = [
   { title: 'Complete launch-critical testing', area: 'SiteMargin', status: 'amber' },
   { title: 'Review SiteMargin landing page', area: 'SiteMargin', status: 'amber' },
@@ -27,8 +30,8 @@ export default async function Home() {
 
   const businesses = [
     { name: 'YFD', icon: Briefcase, health: 'green', metrics: [['Revenue', '$350k'], ['Leads', String(leads.yfd.total)], ['Profit Goal', '$200k'], ['Staff', '4 + Steve']] },
-    { name: 'SiteMargin', icon: LineChart, health: 'amber', metrics: [['MRR', '$0'], ['ARR', '$0'], ['Waitlist', String(leads.siteMargin.total)], ['Support', '0']] },
-    { name: 'FocablyED', icon: Flame, health: 'amber', metrics: [['MRR', '$0'], ['ARR', '$0'], ['Waitlist', String(leads.focably.total)], ['Support', '0']] },
+    { name: 'SiteMargin', icon: LineChart, health: 'amber', metrics: [['MRR', '$0'], ['ARR', '$0'], ['Leads', String(leads.siteMargin.total)], ['Support', '0']] },
+    { name: 'FocablyED', icon: Flame, health: 'amber', metrics: [['MRR', '$0'], ['ARR', '$0'], ['Leads', String(leads.focably.total)], ['Support', '0']] },
     { name: 'Investments', icon: DollarSign, health: 'amber', metrics: [['Portfolio', 'Manual'], ['Super', 'Manual'], ['Freedom', 'TBD'], ['Cash', 'TBD']] },
   ]
 
